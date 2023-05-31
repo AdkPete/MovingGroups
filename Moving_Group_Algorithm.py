@@ -10,7 +10,6 @@ import astropy.units as u
 import astropy.coordinates as coord
 import os
 
-
 '''
 This module contains code for my algorithm to detect moving grouos
 This is an updated version of the method described in Craig et. al. 2021
@@ -122,11 +121,23 @@ def get_background(x,y,bw = 3 , N = 20):
 
 	return background
 
-def get_smoothed_background(x,y):
+def get_smoothed_background(imd,xgrid,ygrid):
 
-	print (x.shape , y.shape) ; exit()
 
-def find_moving_groups(x,y,bw = 3,showplots = False,verbose=False,sigma = 2 , areacut = 7.5):
+
+	
+	new_imd = gaussian_filter(imd , sigma = 5)
+	plt.subplot(1,2,1)
+	plt.title("New")
+	plt.pcolormesh(xgrid , ygrid , new_imd)
+
+	plt.subplot(1,2,2)
+	plt.title("old")
+	plt.pcolormesh(xgrid , ygrid , imd)
+	plt.show()
+	return new_imd
+
+def find_moving_groups(x,y,bw = 3,showplots = False,verbose=False,sigma = 2 , areacut = None):
 
 	
 	'''
@@ -136,6 +147,8 @@ def find_moving_groups(x,y,bw = 3,showplots = False,verbose=False,sigma = 2 , ar
 	The algorithm should work given any two equal length arrays however
 	'''
 
+	if areacut == None:
+		areacut = 2 * sigma
 
 	
 	rescale = 5
@@ -152,7 +165,7 @@ def find_moving_groups(x,y,bw = 3,showplots = False,verbose=False,sigma = 2 , ar
 
 	imd = np.transpose(statres[0])
 	
-	res = get_smoothed_background(x,y,bw)
+	res = get_smoothed_background(imd,xgrid,ygrid)
 
 
 	sigma_grid = np.ones(res.shape)
@@ -179,24 +192,13 @@ def find_moving_groups(x,y,bw = 3,showplots = False,verbose=False,sigma = 2 , ar
 	nxgrid , nygrid = np.meshgrid(nx,ny)
 	if showplots:
 		
-		plt.pcolormesh(xgrid , ygrid , imd)
-		plt.show()
-		plt.show()
-
-		plt.pcolormesh(xgrid , ygrid , sigma_grid)
-		plt.colorbar()
-		plt.title("Uncertainty Grid")
-		plt.show()
-		plt.show()
 
 
-		plt.pcolormesh(xgrid , ygrid , res)
-		plt.colorbar()
-		plt.show()
 
 		plt.pcolormesh(nxgrid , nygrid , residual)
 		plt.colorbar()
-		plt.contour(nxgrid,nygrid , residual , levels = [2,3,4])
+		plt.title("Residuals")
+		plt.contour(nxgrid,nygrid , residual , levels = [2,3,4,5])
 		
 		plt.show()
 
@@ -305,8 +307,9 @@ plt.ylabel("V (km/s)")
 plt.savefig("GaiaVelocities.pdf")
 plt.close()
 #x,y = get_test_data()
-#find_moving_groups(x,y , showplots = True,verbose=True,sigma = 0.5 , areacut = 1)
-find_moving_groups(x,y , showplots = True,verbose=True,sigma = 11 , areacut = 10)
+find_moving_groups(x,y , showplots = True,verbose=True,sigma = 2.5 )
+
+#find_moving_groups(x,y , showplots = True,verbose=True,sigma = 11 , areacut = 10)
 #find_moving_groups(x,y , bw = e , showplots = True,verbose=True,sigma = 7.25 , areacut = 7.5)
 '''
 ng = []
