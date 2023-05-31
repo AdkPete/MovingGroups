@@ -4,7 +4,12 @@ import scipy.stats as stats
 import scipy.interpolate as interp
 from scipy.ndimage.filters import gaussian_filter
 import matplotlib.patches as patches
-from shapely.geometry import Point, Polygon
+from tqdm import tqdm
+from astroquery.gaia import Gaia
+import astropy.units as u
+import astropy.coordinates as coord
+import os
+
 
 '''
 This module contains code for my algorithm to detect moving grouos
@@ -79,15 +84,15 @@ def get_test_data():
 
 	return x,y
 
-def get_backround(x,y,bw = 3 , N = 10):
+def get_background(x,y,bw = 3 , N = 20):
 
 	'''
 	returns the background pixel data for the given data set
 	bw is the bin width
 	N determines how accurate the integration is
 	'''
-	x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
-	y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
+	x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw / N)
+	y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw / N)
 	
 	gx1 = np.mean(x)
 	gy1 = np.mean(y)
@@ -95,20 +100,33 @@ def get_backround(x,y,bw = 3 , N = 10):
 	std_y1 = np.std(y)
 	
 	xgrid , ygrid = np.meshgrid(x1,y1)
-
-	xstep = x1[1] = x1[0]
-	ystep = y1[1] - y1[0]
-
 	
 	pos = np.dstack((xgrid, ygrid))
 
 	pdf = stats.multivariate_normal(mean = [gx1,gy1] , cov = [ [ std_x1 ** 2 , 0 ] , [0 , std_y1 ** 2] ] )
 
-	res = pdf.pdf(pos) * len(x) * bw ** 2
-	return res
+	##Res evaluates the pdf at our increased resolution
+	res = pdf.pdf(pos)
+	##Now we integrate down to our original image resolution
+
+	##Set bin edges
+	x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
+	y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
+
+	x1 = np.append(x1 , x1[-1] + bw)
+	y1 = np.append(y1 , y1[-1] + bw)
+
+	background = stats.binned_statistic_2d(xgrid.flatten(),ygrid.flatten(),res.flatten(),bins=[x1,y1],statistic = "sum")
+	background = np.transpose(background[0]) * len(x)  * (bw / N) ** 2
 
 
-def find_moving_groups(x,y,bw = 3):
+	return background
+
+def get_smoothed_background(x,y):
+
+	print (x.shape , y.shape) ; exit()
+
+def find_moving_groups(x,y,bw = 3,showplots = False,verbose=False,sigma = 2 , areacut = 7.5):
 
 	
 	'''
@@ -134,42 +152,63 @@ def find_moving_groups(x,y,bw = 3):
 
 	imd = np.transpose(statres[0])
 	
-	res = get_backround(x,y,bw)
+	res = get_smoothed_background(x,y,bw)
+
+
+	sigma_grid = np.ones(res.shape)
+
+	ii = np.where(res >= 1.0)
+	sigma_grid[ii] = np.sqrt(res[ii])
+	
+	
 	residual = imd - res
-	ii = np.where( (abs(residual) > 1))
+
+	residual /= sigma_grid
+
+	#ii = np.where( (abs(residual) > 1))
 	
 	
-	cutoff = np.std(residual[ii])
-	residual /= cutoff
+
+	#cutoff = np.std(residual[ii])
+	#residual /= cutoff
 
 	x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
 	y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
-	residual , nx , ny = interpolate_img_data(np.transpose(residual) , x1 , y1 , rescale)
-
+	#residual , nx , ny = interpolate_img_data(np.transpose(residual) , x1 , y1 , rescale)
+	nx,ny = x1,y1
 	nxgrid , nygrid = np.meshgrid(nx,ny)
-	plt.pcolormesh(xgrid , ygrid , imd)
-	plt.show()
-	plt.show()
+	if showplots:
+		
+		plt.pcolormesh(xgrid , ygrid , imd)
+		plt.show()
+		plt.show()
 
-	plt.pcolormesh(xgrid , ygrid , res)
-	plt.colorbar()
-	plt.show()
+		plt.pcolormesh(xgrid , ygrid , sigma_grid)
+		plt.colorbar()
+		plt.title("Uncertainty Grid")
+		plt.show()
+		plt.show()
+
+
+		plt.pcolormesh(xgrid , ygrid , res)
+		plt.colorbar()
+		plt.show()
+
+		plt.pcolormesh(nxgrid , nygrid , residual)
+		plt.colorbar()
+		plt.contour(nxgrid,nygrid , residual , levels = [2,3,4])
+		
+		plt.show()
 
 	plt.pcolormesh(nxgrid , nygrid , residual)
 	plt.colorbar()
-	plt.contour(nxgrid,nygrid , residual , levels = [2,3,4])
+	cs = plt.contour(nxgrid,nygrid , residual , levels = [sigma])
 	
-	plt.show()
-
-	plt.pcolormesh(nxgrid , nygrid , residual)
-	plt.colorbar()
-	cs = plt.contour(nxgrid,nygrid , residual , levels = [2])
-	print (cs.collections[0].get_paths()[0])
 	good_x = []
 	good_y = []
 	paths = []
 	
-	print (residual.shape , nxgrid.shape)
+	
 	points = np.array( [ nxgrid.flatten() , nygrid.flatten() ] )
 	for p in cs.collections[0].get_paths():
 	
@@ -177,20 +216,24 @@ def find_moving_groups(x,y,bw = 3):
 		x = v[:,0]
 		y = v[:,1]
 		area = PolyArea(x,y)
-		print (area , np.mean(x) , np.mean(y))
+		
 		ii = p.contains_points(np.transpose(points))
 		ii = ii.reshape(residual.shape)
 		in2 = np.where(ii == True)
-		print (len(residual[in2]))
+		
 		area = np.sum(residual[in2]) * bw / rescale
-		print (area , np.mean(x) , np.mean(y))
-		if area > 90:
+		
+		if area > areacut:
+			if verbose:
+				print (area , np.mean(x) , np.mean(y))
 			paths.append(p)
 			good_x.append(np.mean(x))
 			good_y.append(np.mean(y))
 
 
-
+	if not showplots:
+		plt.close()
+		return good_x,good_y
 	plt.scatter(good_x , good_y , marker = "x" , s = 10 , color = "red")
 	plt.show()
 
@@ -210,9 +253,71 @@ def find_moving_groups(x,y,bw = 3):
 	for p in paths:
 		patch = patches.PathPatch(p, facecolor='black', lw=2 , fill = False)
 		ax.add_patch(patch)
+	plt.xlim(-50,50)
+	plt.ylim(-50,50)
+	plt.xlabel("U (km/s)")
+	plt.ylabel("V (km/s)")
+	plt.savefig("Moving_Groups.png")
 	plt.show()
 
+	fig, ax = plt.subplots()
+	plt.pcolormesh(xgrid , ygrid , imd)
+	plt.colorbar()
 
+	plt.xlim(-50,50)
+	plt.ylim(-50,50)
+	plt.xlabel("U (km/s)")
+	plt.ylabel("V (km/s)")
+	plt.savefig("Moving_Groups_ng.png")
+	plt.show()
 
-x,y = get_test_data()
-find_moving_groups(x,y)
+	return good_x , good_y
+
+def get_DR3_sample():
+
+	if os.path.exists("gaia.npy"):
+		x , y = np.load("gaia.npy" , allow_pickle = True)
+		return x , y
+	job = Gaia.launch_job_async("select top 50000 * from gaiadr3.gaia_source where parallax > 10 and radial_velocity is not NULL")
+	r = job.get_results()
+	print ("Number of stars returned {}".format(len(r)))
+	sc = coord.SkyCoord(ra = r["ra"] , dec = r["dec"] , distance = 1 * u.kpc / r["parallax"].value , pm_ra_cosdec = r["pmra"] , pm_dec = r["pmdec"], radial_velocity = r["radial_velocity"])
+
+	gc = sc.transform_to(coord.Galactocentric)
+	
+	np.save("gaia.npy" , [gc.v_x.value , gc.v_y.value - 220])
+	return gc.v_x.value , gc.v_y.value - 220
+
+def filter(x,y):
+	ii = np.where( (abs(x) < 100) & (abs(y) < 100))
+	x = x[ii]
+	y = y[ii]
+	return x,y
+
+x,y = get_DR3_sample()
+x,y = filter(x,y)
+
+plt.hist2d(x,y , bins = 75)
+plt.xlim(-50,50)
+plt.ylim(-50,50)
+plt.xlabel("U (km/s)")
+plt.ylabel("V (km/s)")
+plt.savefig("GaiaVelocities.pdf")
+plt.close()
+#x,y = get_test_data()
+#find_moving_groups(x,y , showplots = True,verbose=True,sigma = 0.5 , areacut = 1)
+find_moving_groups(x,y , showplots = True,verbose=True,sigma = 11 , areacut = 10)
+#find_moving_groups(x,y , bw = e , showplots = True,verbose=True,sigma = 7.25 , areacut = 7.5)
+'''
+ng = []
+for i in tqdm(range(50)):
+	x,y = get_test_data()
+	gx , gy = find_moving_groups(x,y)
+
+	ng.append(len(gx))
+
+if min(ng) < 4 or max(ng) > 4:
+	plt.hist(ng)
+	plt.show()
+print (min(ng) , max(ng))
+'''
