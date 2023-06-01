@@ -202,8 +202,7 @@ def find_moving_groups(x,y,bw = 3,showplots = False,verbose=False,sigma = 2 , ar
 		
 		plt.show()
 
-	plt.pcolormesh(nxgrid , nygrid , residual)
-	plt.colorbar()
+
 	cs = plt.contour(nxgrid,nygrid , residual , levels = [sigma])
 	
 	good_x = []
@@ -236,6 +235,7 @@ def find_moving_groups(x,y,bw = 3,showplots = False,verbose=False,sigma = 2 , ar
 	if not showplots:
 		plt.close()
 		return good_x,good_y
+	
 	plt.scatter(good_x , good_y , marker = "x" , s = 10 , color = "red")
 	plt.show()
 
