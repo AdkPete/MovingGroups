@@ -27,22 +27,29 @@ def PolyArea(x,y):
 	##the vertices, respectively.
 	return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
 
-def get_test_data():
+def get_test_data(seed):
 
 	'''
 	generates sample data
 	will include backround data plus some artificial moving groups
 	designed for algorithm testing
+	returns x,y (simulated velocity components)
+	also returns true group locations (true_x , true_y)
 	'''
 
-
+	if seed is not None:
+		np.random.seed(seed)
 	##Background first
+
 
 	bx = np.random.normal(0 , 50 , 50000)
 	by = np.random.normal(0,50,50000)
 
 	##Add in Simulated groups
-	
+
+	true_x = [25 , -5 , -40 , -40]
+	true_y = [25 , -25 , 0 , -40]
+
 	gx = np.random.normal(25 , 5 , 350)
 	gy = np.random.normal(25 , 5 , 350)
 
@@ -69,7 +76,7 @@ def get_test_data():
 	y = np.append(y , gy)
 
 
-	return x,y
+	return x,y,true_x,true_y
 
 def get_gaussian_background(x , y , params):
 
@@ -82,8 +89,16 @@ def get_gaussian_background(x , y , params):
 	bw = params["bin_width"]
 	N = params["gauss_integration_N"]
 
-	x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw / N)
-	y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw / N)
+	if params["xbounds"] is None:
+		x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw / N)
+	else:
+		x1 =  np.arange( params["xbounds"][0] ,  params["xbounds"][1]  , bw / N)
+
+
+	if params["ybounds"] is None:
+		y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw / N)
+	else:
+		y1 = np.arange( params["ybounds"][0] ,  params["ybounds"][1]  , bw / N)
 	
 	gx1 = np.mean(x)
 	gy1 = np.mean(y)
@@ -101,8 +116,16 @@ def get_gaussian_background(x , y , params):
 	##Now we integrate down to our original bin sizes
 
 	##Set bin edges
-	x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
-	y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
+	if params["xbounds"] is None:
+		x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
+	else:
+		x1 =  np.arange( params["xbounds"][0] ,  params["xbounds"][1]  , bw)
+
+
+	if params["ybounds"] is None:
+		y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
+	else:
+		y1 = np.arange( params["ybounds"][0] ,  params["ybounds"][1]  , bw)
 
 	x1 = np.append(x1 , x1[-1] + bw)
 	y1 = np.append(y1 , y1[-1] + bw)
@@ -121,7 +144,7 @@ def get_smoothed_background(imd,xgrid,ygrid , params):
 	The size of this kernel is set with params["background_smoothing_sigma"]
 	'''
 
-	smooth_sigma = params["background_smoothing_sigma"]
+	smooth_sigma = params["background_smoothing_sigma"] / params["bin_width"]
 	
 	new_imd = gaussian_filter(imd , sigma = smooth_sigma)
 
@@ -181,15 +204,15 @@ def get_DR3_sample(N = 50000 , vsun = 220):
 
 	gc = sc.transform_to(coord.Galactocentric)
 	
-	np.save("gaia.npy" , [gc.v_x.value , gc.v_y.value - 220])
+	np.save("gaia.npy" , [gc.v_x.value , gc.v_y.value - vsun])
 	##These are cartesian velocity compontents, commonly used in moving group analysis
 	##Some coordinate definitions flip the sign of the x velocities. Doesn't change anything
 	##except that it will flip the distribution in x (and therefore the group positions)
 
-	return gc.v_x.value , gc.v_y.value - 220
+	return gc.v_x.value , gc.v_y.value - vsun
 
 
-def find_moving_groups(x,y, sigma , params):
+def find_moving_groups(x,y , params):
 
 	
 	'''
@@ -216,12 +239,21 @@ def find_moving_groups(x,y, sigma , params):
 	areacut = params["area_cutoff"]
 	bw = params["bin_width"]
 	verbose = params["verbose"]
+	sigma = params["sigma"]
 	
-	rescale = 5
 
-	x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
-	y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
+	if params["xbounds"] is None:
+		x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
+	else:
+		x1 =  np.arange( params["xbounds"][0] ,  params["xbounds"][1]  , bw)
 
+
+	if params["ybounds"] is None:
+		y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
+	else:
+		y1 = np.arange( params["ybounds"][0] ,  params["ybounds"][1]  , bw)
+
+	
 	##Add an extra bin to the end, we want to define bin edges and this is required to
 	##get the right shape of the residual array
 
@@ -234,12 +266,12 @@ def find_moving_groups(x,y, sigma , params):
 
 	imd = np.transpose(statres[0])
 	
-	
 	if params["background_type"] == "Smoothed":
 		res = get_smoothed_background(imd,xgrid,ygrid,params)
 
 	elif params["background_type"] == "Gaussian":
 		res = get_gaussian_background(x,y,params)
+
 
 	sigma_grid = np.ones(res.shape)
 
@@ -251,12 +283,21 @@ def find_moving_groups(x,y, sigma , params):
 
 	residual /= sigma_grid
 
-
-	x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
-	y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
 	
-	nx,ny = x1,y1
-	nxgrid , nygrid = np.meshgrid(nx,ny)
+	if params["xbounds"] is None:
+		x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
+	else:
+		x1 =  np.arange( params["xbounds"][0] ,  params["xbounds"][1]  , bw)
+
+
+	if params["ybounds"] is None:
+		y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
+	else:
+		y1 = np.arange( params["ybounds"][0] ,  params["ybounds"][1]  , bw)
+	
+	nxgrid , nygrid = np.meshgrid(x1,y1)
+
+
 
 	if params["display_residuals"]:
 		##Plots residual functions
@@ -269,16 +310,49 @@ def find_moving_groups(x,y, sigma , params):
 		plt.show()
 
 
+	good_x , good_y , paths = peak_finder(nxgrid,nygrid,residual,sigma,params)
+
+	
+
+	return good_x , good_y , residual , paths , xgrid , ygrid , imd
+
+def peak_finder(nxgrid , nygrid , residual , sigma , params , known_x = [] , known_y = []):
+
+	'''
+	This funcion finds the peaks in a given 2d residual array
+	uses the areacutoff defined in params
+	sigma determines the level of the contours
+	nxgrid and nygrid are our bin postions
+
+	known_x and known_y give the positions of groups already detected.
+	The idea is that we won't return those groups. This is used in the iterative solver
+
+	Returns
+	________
+	peak x and y values, along with relevant contours.
+	'''
+
+
+	bw = params["bin_width"]
+	areacut = params["area_cutoff"]
+	verbose = params["verbose"]
+
 	cs = plt.contour(nxgrid,nygrid , residual , levels = [sigma])
 	
 	good_x = []
 	good_y = []
 	paths = []
 	
-	
+	known_points = np.transpose(np.array([known_x , known_y]))
+
 	points = np.array( [ nxgrid.flatten() , nygrid.flatten() ] )
 	for p in cs.collections[0].get_paths():
 	
+		R = p.contains_points( known_points)
+		if np.any(R): ##If the contour contains a known group, skip.
+			continue
+
+
 		v = p.vertices
 		x = v[:,0]
 		y = v[:,1]
@@ -288,8 +362,7 @@ def find_moving_groups(x,y, sigma , params):
 		ii = ii.reshape(residual.shape)
 		in2 = np.where(ii == True)
 		
-		area = np.sum(residual[in2]) * bw / rescale
-		
+		area = np.sum(residual[in2]) * bw
 		if area > areacut:
 			if verbose:
 				print (area , np.mean(x) , np.mean(y))
@@ -297,45 +370,174 @@ def find_moving_groups(x,y, sigma , params):
 			good_x.append(np.mean(x))
 			good_y.append(np.mean(y))
 
+	
+
+	return good_x , good_y , paths
 
 
-	return good_x , good_y , residual , paths , xgrid , ygrid , imd
+def plot_groups(imd,paths,xgrid,ygrid,good_x , good_y , true_x = None , true_y = None , show=False):
 
-def plot_groups(imd,paths,xgrid,ygrid,show=False):
+	'''
+	Plotting code to plot detected groups.
+	Makes 2 figures, one with contours displayed and one without them
 
+	imd is a 2d array with velocity or residual data
+	paths contains the contours to display
+	xgrid and ygrid contain the bin edges to use for plotting
+	good_x and good_y contain our group coordinates
+	true_x and true_y are the true coordinates for groups (from simulated test data) 
 
+	'''
 
 	fig, ax = plt.subplots()
 	plt.pcolormesh(xgrid , ygrid , imd)
 	plt.colorbar()
-	plt.scatter(good_x , good_y , marker = "x" , s = 10 , color = "red")
+	plt.scatter(good_x , good_y , marker = "x" , s = 15 , color = "red")
+	if true_x is not None:
+		plt.scatter(true_x , true_y , marker = "o" , s = 25 , edgecolors = "blue" , facecolors = 'none')
 	for p in paths:
 		patch = patches.PathPatch(p, facecolor='black', lw=2 , fill = False)
 		ax.add_patch(patch)
 	
-	plt.xlim(params["plot_x_limits"])
-	plt.ylim(params["plot_y_limits"])
+	
+	plt.xlim(-75,75)
+	plt.ylim(-75,75)
 	plt.xlabel("U (km/s)")
 	plt.ylabel("V (km/s)")
 
 	plt.savefig("Moving_Groups.pdf")
-	if show:
-		plt.show()
+	plt.close()
 
 
 	fig, ax = plt.subplots()
 	plt.pcolormesh(xgrid , ygrid , imd)
 	plt.colorbar()
-	plt.scatter(good_x , good_y , color = "red" , marker = "x")
-	plt.xlim(params["plot_x_limits"])
-	plt.ylim(params["plot_y_limits"])
+	plt.scatter(good_x , good_y , color = "red" , marker = "x" , s = 15)
+	if true_x is not None:
+		plt.scatter(true_x , true_y , marker = "o" , s = 15 , edgecolors = "blue" , facecolors = 'none')
+	plt.xlim(-75,75)
+	plt.ylim(-75,75)
 	plt.xlabel("U (km/s)")
 	plt.ylabel("V (km/s)")
 	plt.savefig("Moving_Groups_Scatter.pdf")
-	if show:
-		plt.show()
-
+	plt.close()
 	return good_x , good_y
+
+def iterative_solver(x,y,params):
+
+	'''
+	Function to minimize effects of parameter selection
+	This will prevent adjacent groups from merging together
+
+	x,y are our velocity components, and params is our parameter dictionary
+	'''
+
+	areacut = params["area_cutoff"]
+	bw = params["bin_width"]
+	verbose = params["verbose"]
+	sigma = params["sigma"]
+	
+
+	if params["xbounds"] is None:
+		x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
+	else:
+		x1 =  np.arange( params["xbounds"][0] ,  params["xbounds"][1]  , bw)
+
+
+	if params["ybounds"] is None:
+		y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
+	else:
+		y1 = np.arange( params["ybounds"][0] ,  params["ybounds"][1]  , bw)
+
+	
+	##Add an extra bin to the end, we want to define bin edges and this is required to
+	##get the right shape of the residual array
+
+	x1 = np.append(x1 , x1[-1] + bw)
+	y1 = np.append(y1 , y1[-1] + bw)
+
+	xgrid , ygrid = np.meshgrid(x1,y1)
+
+	statres = stats.binned_statistic_2d(x , y , x, bins = [x1,y1],statistic = "count")
+
+	imd = np.transpose(statres[0])
+	
+	if params["background_type"] == "Smoothed":
+		res = get_smoothed_background(imd,xgrid,ygrid,params)
+
+	elif params["background_type"] == "Gaussian":
+		res = get_gaussian_background(x,y,params)
+
+
+	sigma_grid = np.ones(res.shape)
+
+	ii = np.where(res >= 1.0)
+	sigma_grid[ii] = np.sqrt(res[ii])
+	
+	
+	residual = imd - res
+
+	residual /= sigma_grid
+
+	sigma_start = params["sigma_start"]
+	sigma_step = params["sigma_step"]
+	min_sigma = params["min_sigma"]
+
+	sigma = sigma_start
+
+
+	
+	if params["xbounds"] is None:
+		x1 = np.arange(int( np.min(x) )  ,  int( np.max(x) + 1 )  , bw)
+	else:
+		x1 =  np.arange( params["xbounds"][0] ,  params["xbounds"][1]  , bw)
+
+
+	if params["ybounds"] is None:
+		y1 = np.arange(int( np.min(y) )  ,  int( np.max(y) + 1 )  , bw)
+	else:
+		y1 = np.arange( params["ybounds"][0] ,  params["ybounds"][1]  , bw)
+	
+	nxgrid , nygrid = np.meshgrid(x1,y1)
+
+	known_x = []
+	known_y = []
+	known_paths = []
+
+	sigmas = np.arange(sigma_start , min_sigma , -1 * sigma_step)
+	for sigma in tqdm(sigmas , desc = "Running iterative solver"):
+
+		good_x , good_y , paths = peak_finder(nxgrid,nygrid,residual,sigma,params,known_x , known_y)
+		known_x += good_x
+		known_y += good_y
+		known_paths += paths
+
+	return known_x , known_y , residual , known_paths , xgrid , ygrid , imd
+
+def combine_nearby_groups(group_x , group_y , min_distance):
+
+	'''
+
+	This function is designed to combine nearby groups. Sometimes this is necessary
+	if the algorithm is splitting groups into multiple detections.
+	Any groups within min_distance of each other will be comgined to form a single group.
+
+	'''
+
+	group_x = np.array(group_x)
+	group_y = np.array(group_y)
+
+	done = False ##will switch to true when all groups are min_distance or greater appart
+
+	for i in range(len(group_x)):
+		
+		distances = np.sqrt( (group_x[i] - group_x) ** 2 + (group_y[i] - group_y) ** 2)
+		
+		ii = np.where(distances < min_distance)
+		group_x[ii] = np.mean(group_x[ii])
+		group_y[ii] = np.mean(group_y[ii])
+		
+	return group_x , group_y
 
 if __name__ == "__main__":
 
@@ -347,12 +549,25 @@ if __name__ == "__main__":
 	params["bin_width"] = 3
 
 	##Number of integration steps to use for Gaussian background (uses N^2 positions per bin)
-	params["gauss_integration_N"] = 30
+	params["gauss_integration_N"] = 5
 
 	##area_cutoff sets the detection threshold. The area is computed as a surface integral of 
 	##the residual / sqrt(background) inside each contour. If this is less then area_cutoff, the 
-	##group is rejected. Typical values are something like 5 * bin_width ^ 2
-	params["area_cutoff"] = 5
+	##group is rejected. Typical values are something like  5 * bin_width ^ 2
+	params["area_cutoff"] = 30
+
+	##Determines cutoff in residual grid. Higher numbers require that pixels have larger overdensities.
+	##High values reduce sensitivity, and may reduce false positives. This is the primary parameter
+	##That will determine wether or not nearby groups are counted as seperate groups or one group. Values can
+	##Range considerably based on the source data / background, but typically something like 3 is good.
+	params["sigma"] = 3
+
+	##Params for the iterative solver. It runs through a series of sigma values, from sigma_start to min_sigma
+	##Each iteration reduces the sigma value by sigma_step'
+
+	params["sigma_start"] = 25
+	params["sigma_step"] = 1.0
+	params["min_sigma"] = 2.0
 
 	##if verbose, we print out some extra info, mostly for debugging purposes
 	params["verbose"] = False
@@ -364,16 +579,31 @@ if __name__ == "__main__":
 	params["show_smoothing_figures"] = False
 
 	##Set to either 'Gaussian' or 'Smoothed'. Determines which kind of background to use
-	params["background_type"] = "Gaussian"
+	params["background_type"] = "Smoothed"
 
-	##if true, display residual figure
+	##if true, display residual figure in find_moving_groups
+	##These figures can be useful for parameter selection and debugging
 	params["display_residuals"] = True
 
-	##if true, make figures in find_moving_groups. Otherwise we skip this step.
-	params["make_group_figures"] = True
 
+	##set velocity limits. If None, it will set them automatically based on the data
+	##Otherwise, we only consider stars with velocities inside these ranges
 
-	x,y = get_test_data()
+	params["xbounds"] = [-250 , 250]
+	params["ybounds"] = [-250 , 250]
 
-	good_x , good_y , residual , paths , xgrid , ygrid , imd = find_moving_groups(x,y,3,params)
+	##Get data:
 
+	x,y , true_x , true_y = get_test_data(seed=42)
+
+	#x,y = get_DR3_sample(N = 50000 , vsun = 220)
+	
+	##Find Groups:
+	good_x , good_y , residual , paths , xgrid , ygrid , imd = find_moving_groups(x,y,params)
+
+	good_x , good_y , residual , paths , xgrid , ygrid , imd = iterative_solver(x,y,params)
+
+	good_x , good_y = combine_nearby_groups(good_x , good_y , 15)
+	##Make plots:
+	plot_groups(imd,paths,xgrid,ygrid,good_x,good_y , true_x , true_y)
+	#plot_groups(imd,paths,xgrid,ygrid,good_x,good_y)
